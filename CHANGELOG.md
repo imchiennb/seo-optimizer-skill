@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-30
+
+First real-world run of `audit-url.sh`, against a live production Next.js site
+(`moai.profyai.vn`). It immediately exposed a defect in the script itself.
+
+### Fixed
+
+- **`audit-url.sh` read headers from the wrong response.** The cache and robots header check
+  used `curl -sI` on the original URL, so on any tested path that redirects it inspected the
+  `3xx` response — which carries no `Cache-Control` — and reported nothing. On the live site
+  the root path returns `308 → /vi/movies`, so the script silently missed
+  `Cache-Control: private, no-store, max-age=0, must-revalidate` and
+  `cf-cache-status: DYNAMIC`: a page re-rendered from scratch on every single request. The
+  check now resolves the final URL first and reads that response.
+
+### Added
+
+- `audit-url.sh` now prints the final URL after redirects and warns explicitly on three
+  conditions that were previously reported as plain text, or not at all: a missing
+  `Cache-Control`, a `Cache-Control` containing `no-store`/`no-cache`, and
+  `cf-cache-status: DYNAMIC`.
+- Regression test using a local HTTP server (`308 → 200` carrying `Cache-Control` and
+  `X-Robots-Tag`), verified to fail against the previous version of the script.
+- Self-test count: 45 → 48 checks. All four audit scripts have now been exercised against
+  real input.
+
 ## [1.0.1] - 2026-09-30
 
 Verified against **real** Next.js builds for the first time — `next@16.3.7` App Router

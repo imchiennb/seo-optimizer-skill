@@ -240,6 +240,49 @@ echo "$OUT5" | grep -q 'không tìm thấy next.config' && bad "REGRESSION: stil
 echo "$OUT5" | grep -q 'chỉ có .*app/robots.js' && ok "grep-antipatterns.sh resolves public/ against project root" || warn "robots conflict check did not report the convention file"
 echo "$OUT3" | grep -q 'Client Component'   && ok "grep-antipatterns.sh → found metadata in client component" || bad "missed metadata-in-client-component"
 
+# --- 7h. REGRESSION: audit-url.sh must read headers from the FINAL response.
+# Found against a real site: the tested path returned 308 and the page's
+# Cache-Control lived on the redirect target, so `curl -sI` on the original URL
+# silently reported nothing. A live site with `no-store` was reported as having
+# no cache header at all.
+srv_js="$TMP/srv.mjs"
+cat > "$srv_js" <<'JS'
+import { createServer } from 'node:http'
+import { writeFileSync } from 'node:fs'
+const server = createServer((req, res) => {
+  if (req.url === '/') {
+    res.writeHead(308, { Location: '/final' })
+    res.end()
+  } else {
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'private, no-store, max-age=0',
+      'X-Robots-Tag': 'noindex',
+    })
+    res.end('<!DOCTYPE html><html lang="vi"><head><title>Trang đích sau redirect</title></head><body><h1>x</h1></body></html>')
+  }
+})
+server.listen(0, '127.0.0.1', () => writeFileSync(process.argv[2], String(server.address().port)))
+JS
+rm -f "$TMP/port"
+node "$srv_js" "$TMP/port" &
+SRV_PID=$!
+i=0
+while [ ! -f "$TMP/port" ] && [ "$i" -lt 60 ]; do sleep 0.1; i=$((i+1)); done
+PORT="$(cat "$TMP/port" 2>/dev/null)"
+if [ -n "$PORT" ]; then
+  OUT6=$(bash "$SKILL_DIR/scripts/audit-url.sh" "http://127.0.0.1:$PORT/" 2>&1)
+  echo "$OUT6" | grep -q 'no-store' && ok "REGRESSION audit-url.sh reads Cache-Control from the FINAL response" \
+                                    || bad "REGRESSION: audit-url.sh misses headers behind a redirect"
+  echo "$OUT6" | grep -q 'URL cuối' && ok "audit-url.sh reports the final URL after redirects" \
+                                    || warn "final URL not reported"
+  echo "$OUT6" | grep -q 'noindex'  && ok "audit-url.sh picks up X-Robots-Tag from the final response" \
+                                    || warn "X-Robots-Tag not reported"
+else
+  warn "could not start local test server — redirect-header regression skipped"
+fi
+kill "$SRV_PID" 2>/dev/null
+
 # ---------------------------------------------------------------- summary
 cd "$SKILL_DIR" || exit 2
 printf '\n═══════════════════════════════════════════════════════════\n'

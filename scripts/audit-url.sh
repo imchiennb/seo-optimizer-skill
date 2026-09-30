@@ -31,9 +31,21 @@ for PATH_ in "${PATHS[@]}"; do
   echo "── Chuỗi redirect"
   curl -sIL "$URL" | grep -iE '^HTTP/|^location:' | sed 's/^/   /'
 
-  # 2. Cache header
-  echo "── Cache header"
-  curl -sI "$URL" | grep -iE 'cache-control|x-vercel-cache|cf-cache-status|age:|x-robots-tag' | sed 's/^/   /' || echo "   (không có)"
+  # 2. Cache header — PHẢI xem response CUỐI sau redirect.
+  # Dùng -sI trên URL gốc sẽ đọc header của response 3xx, vốn không mang
+  # Cache-Control của trang thật → bỏ sót lỗi cache nghiêm trọng.
+  FINAL=$(curl -sL -o /dev/null -w '%{url_effective}' "$URL")
+  echo "── Cache header (response cuối)"
+  [ "$FINAL" != "$URL" ] && echo "   URL cuối: $FINAL"
+  curl -sI "$FINAL" | grep -iE 'cache-control|x-vercel-cache|cf-cache-status|age:|x-robots-tag' | sed 's/^/   /'
+  if ! curl -sI "$FINAL" | grep -qi 'cache-control'; then
+    echo "   ⚠ KHÔNG có Cache-Control → CDN không thể cache HTML (TTFB cao, tốn crawl budget)"
+  elif curl -sI "$FINAL" | grep -qiE 'no-store|no-cache'; then
+    echo "   ⚠ Cache-Control chứa no-store/no-cache → mọi request đều render lại từ đầu"
+  fi
+  if curl -sI "$FINAL" | grep -qi 'cf-cache-status: DYNAMIC'; then
+    echo "   ⚠ cf-cache-status: DYNAMIC → Cloudflare không cache trang này"
+  fi
 
   BODY=$(curl -sL "$URL")
 
