@@ -314,6 +314,9 @@ curl -sI https://example.com/san-pham/khong-ton-tai-xyz | head -1
 
 | Triệu chứng | Kiểm tra đầu tiên |
 | --- | --- |
+| **Mọi request trả `no-store`, CDN báo DYNAMIC** | **`next/headers` trong cây import của layout (10.29)** |
+| **`check-seo` báo "0 trang công khai"** | **Layout đọc cookie/header → toàn site dynamic (10.29)** |
+| **og:image trên social hiển thị sai/cắt xấu** | **Kích thước khai man trong helper metadata (10.30)** |
 | Site biến mất hoàn toàn | `noindex` rò rỉ (10.7), `robots.txt` (10.8), manual action |
 | Trang không được index | HTML thô (10.9), canonical (10.14), chất lượng nội dung |
 | Xếp hạng tụt không rõ lý do | Core update, cannibalization, mất backlink, CWV |
@@ -367,3 +370,98 @@ grep -rn "dynamicParams" app 2>/dev/null || echo "Chưa set dynamicParams ở ro
 echo "--- canonical ---"
 grep -rn "canonical" app 2>/dev/null | head -20
 ```
+
+---
+
+## 10.29. `cookies()` giấu sau helper trong layout → toàn site dynamic
+
+| | |
+| --- | --- |
+| **Triệu chứng** | Mọi response trả `cache-control: private, no-store`; `cf-cache-status: DYNAMIC`; TTFB cao; `check-seo.mjs` báo "0 trang công khai"; `next build` cho mọi route là `ƒ Dynamic` |
+| **Nguyên nhân** | Một lời gọi `cookies()` / `headers()` / `draftMode()` nằm trong layout gốc, **hoặc trong một module mà layout import**. Next coi cả cây route dưới layout đó là dynamic |
+| **Cách sửa** | Cô lập phần đọc cookie vào client component, hoặc bọc trong `<Suspense>` kèm `cacheComponents` (PPR) |
+| **Phát hiện** | `bash <SKILL_DIR>/scripts/grep-antipatterns.sh <app-dir>` mục 21 |
+
+### Vì sao grep thường bỏ sót
+
+Đây là điểm quan trọng nhất của mục này. Trong codebase được tổ chức tử tế, layout **không** import `next/headers` trực tiếp:
+
+```ts
+// ❌ grep "next/headers" trên layout.tsx KHÔNG thấy gì
+// src/app/[lang]/layout.tsx
+import { getPrefsFromCookies } from '@/modules/utils/prefs.server';
+const hisPrefs = await getPrefsFromCookies();
+
+// ✅ đây mới là chỗ thật
+// src/modules/utils/prefs.server.ts
+import { cookies } from 'next/headers';
+export async function getPrefsFromCookies() {
+  const store = await cookies();
+  ...
+}
+```
+
+Phải lần theo import nội bộ một cấp (kể cả alias `@/` → đọc `paths` trong `tsconfig.json`).
+
+### Quy trình chẩn đoán
+
+```bash
+# 1. Có trang nào prerender không?
+npm run build 2>&1 | grep -E '○|ƒ'          # ○ Static vs ƒ Dynamic
+find .next/server/app -name '*.html' | grep -vE '_(not-found|global-error)'
+
+# 2. Nếu 0 trang → tìm next/headers trong cây import của layout
+bash <SKILL_DIR>/scripts/grep-antipatterns.sh src/app
+
+# 3. Xác nhận từ ngoài (sau deploy)
+bash <SKILL_DIR>/scripts/audit-url.sh https://example.com /
+# → tìm "no-store" và "cf-cache-status: DYNAMIC"
+```
+
+---
+
+## 10.30. Helper metadata khai man kích thước ảnh OG
+
+| | |
+| --- | --- |
+| **Triệu chứng** | `og:image:width`/`height` là 1200×630 nhưng ảnh thật nhỏ hơn nhiều; social card hiển thị cắt xấu, mờ, hoặc không render |
+| **Nguyên nhân** | Hàm `normalizeImage` / `buildMetadata` mặc định `width: 1200, height: 630` cho **mọi** ảnh, kể cả ảnh không biết kích thước |
+| **Cách sửa** | Truyền kích thước thật; **hoặc bỏ hẳn** `og:image:width`/`height` khi không biết (khai man tệ hơn không khai) |
+| **Phát hiện** | `node <SKILL_DIR>/scripts/check-seo.mjs <out-dir>` |
+
+### Ca thật
+
+```ts
+// Helper mặc định cho MỌI ảnh
+function normalizeImage(img) {
+  const base = typeof img === 'string' ? { url: img } : img;
+  return { width: 1200, height: 630, alt: SITE.name, ...base };  // ← mặc định
+}
+```
+
+```tsx
+// Trang phim truyền thumbnail từ API, KHÔNG có width/height
+images: movie.thumbnailUrl ? [{ url: movie.thumbnailUrl, alt: movie.title }] : undefined,
+```
+
+Kết quả trên production — khai 1200×630 cho thumbnail YouTube 480×360:
+
+```html
+<meta property="og:image" content="https://i.ytimg.com/vi/xxx/hqdefault.jpg"/>
+<meta property="og:image:width" content="1200"/>   <!-- SAI -->
+<meta property="og:image:height" content="630"/>   <!-- SAI -->
+```
+
+### Bảng kích thước thumbnail YouTube
+
+| Biến thể | Kích thước thật |
+| --- | --- |
+| `mqdefault.jpg` | 320×180 |
+| `hqdefault.jpg` | **480×360** ← mặc định hay dùng |
+| `sddefault.jpg` | 640×480 |
+| `maxresdefault.jpg` | 1280×720 ✅ đủ chuẩn OG |
+
+Dùng `maxresdefault.jpg` khi có, hoặc tự sinh ảnh OG bằng `ImageResponse`.
+
+> **Bài học tổng quát:** bất kỳ helper nào *điền giá trị mặc định* cho metadata đều có thể đang nói dối. `400` mặc định cho `og:image:width` cũng nguy hiểm như `200` cho một trang không tồn tại.
+

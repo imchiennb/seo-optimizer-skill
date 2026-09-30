@@ -122,4 +122,97 @@ else
   echo "  · không tìm thấy next.config.* trong $PROJECT_ROOT (dùng mặc định)"
 fi
 
+hr "21. next/headers trong layout/page — nguyên nhân số 1 làm toàn site thành dynamic"
+# Một lời gọi cookies() trong layout gốc kéo TOÀN BỘ cây route ra khỏi static
+# rendering: không prerender được trang nào, Next trả
+# `cache-control: private, no-store`, CDN không cache được gì, TTFB cao và mỗi
+# lần Googlebot crawl là một lần render đầy đủ.
+#
+# Phát hiện thật: moai.profyai.vn KHÔNG import next/headers trong layout — nó gọi
+# một helper `getPrefsFromCookies()` từ modules/utils/prefs.server.ts, và helper
+# đó mới là chỗ đọc cookies(). Grep trực tiếp trên layout vì thế báo "không có",
+# tức là bỏ sót đúng ca phổ biến nhất trong codebase được tổ chức tử tế.
+# → Phải lần theo import nội bộ một cấp.
+
+# Gốc của alias "@/": đọc tsconfig.json nếu được, nếu không mặc định "src".
+# Nhiều dự án đặt code ở gốc thay vì src/ — chỉ thử "src/" sẽ bỏ sót.
+ALIAS_BASE=$(node -e '
+  try {
+    const t = require(process.argv[1]);
+    const paths = (t.compilerOptions && t.compilerOptions.paths) || {};
+    for (const k of Object.keys(paths)) {
+      if (k === "@/*" || k === "@") {
+        const v = (paths[k] && paths[k][0]) || "";
+        const b = v.replace(/^\.\//, "").replace(/\/\*$/, "");
+        if (b) { console.log(b); process.exit(0); }
+      }
+    }
+  } catch {}
+' "$PROJECT_ROOT/tsconfig.json" 2>/dev/null || true)
+[ -z "$ALIAS_BASE" ] && ALIAS_BASE="src"
+
+trace_headers() { # $1 = file; in ra "self" hoặc đường dẫn module nội bộ dùng next/headers
+  grep -q "next/headers" "$1" 2>/dev/null && { echo "self"; return; }
+  local mods m rel cand ext
+  mods=$(grep -oE "from ['\"][^'\"]+['\"]" "$1" 2>/dev/null \
+         | sed "s/from ['\"]//; s/['\"]$//" | grep -E '^(@/|\.)' || true)
+  while IFS= read -r m; do
+    [ -z "$m" ] && continue
+    case "$m" in @/*) rel="${m#@/}" ;; *) rel="$m" ;; esac
+    for cand in \
+        "$PROJECT_ROOT/$ALIAS_BASE/$rel" \
+        "$PROJECT_ROOT/src/$rel" \
+        "$PROJECT_ROOT/$rel" \
+        "$(dirname "$1")/$rel"; do
+      for ext in ts tsx js jsx; do
+        if [ -f "$cand.$ext" ] && grep -q "next/headers" "$cand.$ext" 2>/dev/null; then
+          echo "$cand.$ext"; return
+        fi
+      done
+    done
+  done <<< "$mods"
+}
+
+FOUND_LAYOUT=0
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  src=$(trace_headers "$f")
+  [ -z "$src" ] && continue
+  FOUND_LAYOUT=1
+  if [ "$src" = "self" ]; then
+    echo "  ❌ $f (import next/headers trực tiếp)"
+  else
+    echo "  ❌ $f  ←  $src"
+  fi
+done < <(find "$APP_DIR" -type f \( -name 'layout.tsx' -o -name 'layout.jsx' -o -name 'layout.ts' -o -name 'layout.js' \) 2>/dev/null)
+
+if [ "$FOUND_LAYOUT" -eq 1 ]; then
+  echo "     ↳ next/headers trong LAYOUT — MỌI route bên dưới thành dynamic:"
+  echo "       không prerender được, CDN không cache được, TTFB cao."
+  echo "       Cách sửa: cô lập phần đọc cookie vào một client component, hoặc bọc"
+  echo "       trong <Suspense> kèm cacheComponents (PPR) để phần shell vẫn tĩnh."
+else
+  echo "  ✓ không có layout nào (trực tiếp hoặc qua module nội bộ) dùng next/headers"
+fi
+
+FOUND_PAGE=0
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  src=$(trace_headers "$f")
+  [ -z "$src" ] && continue
+  FOUND_PAGE=1
+  echo "  ⚠ $f$([ "$src" = "self" ] || echo "  ←  $src")"
+done < <(find "$APP_DIR" -type f \( -name 'page.tsx' -o -name 'page.jsx' -o -name 'page.ts' -o -name 'page.js' \) 2>/dev/null)
+[ "$FOUND_PAGE" -eq 1 ] && echo "     ↳ next/headers trong page — chỉ trang đó dynamic (chấp nhận được hơn layout)"
+
+# Xác nhận hậu quả: đếm route trong source so với số trang prerender được
+if [ -d "$PROJECT_ROOT/.next/server/app" ]; then
+  SRC_ROUTES=$(find "$APP_DIR" -type f \( -name 'page.tsx' -o -name 'page.jsx' -o -name 'page.ts' -o -name 'page.js' \) 2>/dev/null | wc -l | tr -d ' ')
+  PRE_HTML=$(find "$PROJECT_ROOT/.next/server/app" -name '*.html' 2>/dev/null | grep -vcE '_(not-found|global-error|error)\.html$' || true)
+  echo "  · route trong source: ${SRC_ROUTES:-0} | trang prerender: ${PRE_HTML:-0}"
+  if [ "${SRC_ROUTES:-0}" -gt 0 ] && [ "${PRE_HTML:-0}" -eq 0 ]; then
+    echo "    ❌ 0 trang prerender → mọi route đang dynamic (xem references/02 §2.9)"
+  fi
+fi
+
 printf '\n\033[1mHoàn tất.\033[0m Đánh giá từng mục theo references/10-antipatterns.md\n'

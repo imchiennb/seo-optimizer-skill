@@ -285,6 +285,54 @@ async headers() {
 | Không `await params` `[15]`+ | Metadata rỗng, 404 sai | `const { slug } = await params` |
 | Prerender hàng trăm nghìn URL | Build timeout | `generateSitemaps` chia nhỏ, hoặc ISR on-demand |
 | Gọi `revalidatePath` trong vòng lặp lớn | Nghẽn server | Dùng `revalidateTag` theo entity |
+| **`cookies()`/`headers()`/`draftMode()` trong layout** | **Toàn bộ cây route thành dynamic: 0 trang prerender, `cache-control: private, no-store`, CDN không cache được gì** | Cô lập vào client component hoặc bọc `<Suspense>` + `cacheComponents` |
+
+### ⚠️ Ca thật: `cookies()` trong layout giết toàn bộ static rendering
+
+Đã kiểm chứng trên một site production (Next 16, App Router, i18n `[lang]`).
+
+**Triệu chứng đo từ ngoài:**
+
+```
+cache-control: private, no-cache, no-store, max-age=0, must-revalidate
+cf-cache-status: DYNAMIC
+TTFB: 0.80s
+```
+
+**Bằng chứng từ build:** 5 route trong `src/app` nhưng **0 trang prerender** — chỉ có `_not-found.html` và `_global-error.html`.
+
+**Nguyên nhân trong source:** layout gốc **không** import `next/headers` trực tiếp. Nó gọi một helper:
+
+```ts
+// src/modules/utils/prefs.server.ts
+import { cookies } from 'next/headers';
+export async function getPrefsFromCookies() {
+  const store = await cookies();     // ← nguồn duy nhất làm dynamic cả site
+  ...
+}
+
+// src/app/[lang]/layout.tsx
+const hisPrefs = await getPrefsFromCookies();   // layout này bọc MỌI trang public
+```
+
+**Bài học quan trọng:** grep `next/headers` trên `layout.tsx` **không tìm ra** — vì việc đọc cookie nằm sau một helper. Trong codebase được tổ chức tử tế, đây mới là ca phổ biến. Phải lần theo import nội bộ.
+
+`grep-antipatterns.sh` mục **21** làm việc này và báo:
+
+```
+❌ src/app/[lang]/layout.tsx  ←  src/modules/utils/prefs.server.ts
+   ↳ next/headers trong LAYOUT — MỌI route bên dưới thành dynamic
+```
+
+**Hướng sửa** (cookie ở đây chỉ chứa tuỳ chọn giao diện: accent, density, font-size):
+
+| Cách | Đánh đổi |
+| --- | --- |
+| Chuyển sang đọc ở client component | Shell tĩnh, CDN cache được; đổi lại có thể nháy giao diện (FOUC) |
+| Giữ server-side nhưng bọc `<Suspense>` + `cacheComponents: true` (PPR) | Shell tĩnh + không FOUC; cần bật PPR và rà lại toàn app |
+| Dùng `middleware`/`proxy` đọc cookie rồi ghi vào header | Vẫn dynamic ở tầng render |
+
+> **Kiểm tra nhanh hậu quả:** `npm run build` rồi xem cột phân loại route (`○ Static` vs `ƒ Dynamic`). Nếu mọi route đều `ƒ`, tìm `next/headers` trong cây import của layout.
 
 ---
 

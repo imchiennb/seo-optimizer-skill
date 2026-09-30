@@ -331,6 +331,89 @@ echo "$OUT9" | grep -q 'Bỏ qua 1 trang nội bộ' && ok "static export: /404 
 echo "$OUT9" | grep -q 'Đã kiểm tra 2 trang'  && ok "static export: routes resolved past /index.html" \
                                               || bad "static export: index.html shape not resolved"
 
+# --- 7k. REGRESSION: a build with ZERO public pages must NOT report success.
+# Found on a real production project (moai.profyai.vn): every route was dynamic,
+# the build emitted only _not-found.html and _global-error.html, and check-seo
+# printed "Đã kiểm tra 0 trang" followed by "✅ Không có lỗi SEO chặn deploy"
+# with exit 0. A CI gate that green-lights a build it never inspected is worse
+# than no gate at all.
+empty="empty-build"
+mkdir -p "$empty"
+printf '%s' "$SHELL_MIN" > "$empty/_not-found.html"
+printf '%s' "$SHELL_MIN" > "$empty/_global-error.html"
+
+node "$SKILL_DIR/scripts/check-seo.mjs" "$empty" >/dev/null 2>&1
+[ $? -eq 3 ] && ok "REGRESSION: 0 public pages exits 3 (was a false PASS with exit 0)" \
+             || bad "REGRESSION: empty build did not exit 3"
+OUTE=$(node "$SKILL_DIR/scripts/check-seo.mjs" "$empty" 2>&1)
+echo "$OUTE" | grep -q 'KHÔNG CÓ TRANG CÔNG KHAI NÀO' && ok "empty build names the problem loudly" \
+                                                      || bad "empty build message missing"
+echo "$OUTE" | grep -q 'cookies() / headers() / draftMode()' && ok "empty build suggests the usual root cause" \
+                                                             || bad "empty build does not suggest a cause"
+node "$SKILL_DIR/scripts/check-seo.mjs" "$empty" --allow-empty >/dev/null 2>&1
+[ $? -eq 0 ] && ok "--allow-empty permits an intentionally all-dynamic build" \
+             || bad "--allow-empty did not suppress the empty-build failure"
+
+# --- 7l. REGRESSION: --src reports source routes vs prerendered pages
+mkdir -p "$empty/src/app/[lang]/movies"
+for r in page home; do printf '%s' 'export default function P(){return null}' > "$empty/src/app/$r.tsx"; done
+printf '%s' 'export default function P(){return null}' > "$empty/src/app/[lang]/movies/page.tsx"
+OUTS=$(node "$SKILL_DIR/scripts/check-seo.mjs" "$empty" --src="$empty/src/app" 2>&1)
+echo "$OUTS" | grep -q 'route tồn tại trong' && ok "--src reports source route count vs 0 prerendered" \
+                                             || warn "--src did not report the source route count"
+
+# --- 7m. REGRESSION: no false "hybrid?" hint for a pure App Router project.
+# Next always emits .next/server/pages/404.html and 500.html even for App
+# Router-only apps, so an existsSync check fired on essentially every project.
+hybf="app-only"
+mkdir -p "$hybf/app" "$hybf/pages"
+mk_clean "$hybf/app/index.html" "Trang chủ App Router thuần" "https://example.com/" "Mô tả trang chủ đủ dài để không kích hoạt cảnh báo về độ dài trong script kiểm tra này."
+printf '%s' "$SHELL_MIN" > "$hybf/pages/404.html"
+printf '%s' "$SHELL_MIN" > "$hybf/pages/500.html"
+OUTH=$(node "$SKILL_DIR/scripts/check-seo.mjs" "$hybf/app" 2>&1)
+echo "$OUTH" | grep -q 'dự án hybrid' && bad "REGRESSION: false hybrid hint on an App-Router-only project" \
+                                     || ok "REGRESSION: no false hybrid hint when pages/ holds only framework pages"
+
+# --- 7n. REGRESSION: cookies() behind a helper module must still be detected.
+# The real project did not import next/headers in its layout — it called a
+# helper (getPrefsFromCookies) that did. A direct grep missed it entirely.
+dyn="dynamic-proj"
+mkdir -p "$dyn/app/[lang]" "$dyn/lib"
+cat > "$dyn/lib/prefs.server.ts" <<'TS'
+import { cookies } from 'next/headers';
+export async function getPrefs() { const c = await cookies(); return c.get('x')?.value; }
+TS
+cat > "$dyn/app/[lang]/layout.tsx" <<'TS'
+import { getPrefs } from '@/lib/prefs.server';
+export default async function L({ children }) { const p = await getPrefs(); return children; }
+TS
+OUTD=$(bash "$SKILL_DIR/scripts/grep-antipatterns.sh" "$dyn/app" 2>&1)
+echo "$OUTD" | grep -q 'prefs.server.ts' && ok "REGRESSION: cookies() detected through a helper module import" \
+                                        || bad "REGRESSION: indirect cookies() usage not detected"
+echo "$OUTD" | grep -q 'MỌI route bên dưới thành dynamic' && ok "detector explains the consequence" \
+                                                          || warn "detector does not explain the consequence"
+
+# --- 7o. REGRESSION: og:image lying about dimensions
+ogi="og-proj"; mkdir -p "$ogi"
+cat > "$ogi/index.html" <<'HTML'
+<!DOCTYPE html><html lang="vi"><head>
+<title>Trang phim kiểm chứng og image</title>
+<meta name="description" content="Mô tả đủ dài để không kích hoạt cảnh báo về độ dài trong script kiểm tra này.">
+<link rel="canonical" href="https://example.com/phim/abc">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta property="og:title" content="Phim ABC">
+<meta property="og:image" content="https://i.ytimg.com/vi/6WXW83mLad4/hqdefault.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<script type="application/ld+json">{"@context":"https://schema.org"}</script>
+</head><body><h1>Phim ABC</h1></body></html>
+HTML
+OUTO=$(node "$SKILL_DIR/scripts/check-seo.mjs" "$ogi" 2>&1)
+echo "$OUTO" | grep -q 'thumbnail YouTube hqdefault' && ok "REGRESSION: flags small YouTube thumbnail as og:image" \
+                                                    || bad "REGRESSION: YouTube thumbnail not flagged"
+echo "$OUTO" | grep -q 'kích thước khai man' && ok "REGRESSION: flags declared og:image dimensions that contradict the real image" \
+                                            || bad "REGRESSION: false og:image dimensions not flagged"
+
 # ---------------------------------------------------------------- summary
 cd "$SKILL_DIR" || exit 2
 printf '\n═══════════════════════════════════════════════════════════\n'

@@ -104,6 +104,25 @@ Running only one silently misses the other router's routes — and misses duplic
 
 It automatically skips framework-generated pages, which always lack metadata and are not yours to fix: `_not-found` and `_global-error` (App Router), `404` and `500` (Pages Router and static export). Pass `--all` to audit those too.
 
+**It refuses to pass a build it never inspected.** If a build produces no public pages at all — every route dynamic, nothing prerendered — the script exits **3** with a loud diagnostic instead of reporting success. This was a real false pass: a production project with 5 routes and 0 prerendered pages was being green-lit. For genuinely all-dynamic apps (dashboards, authenticated tools), pass `--allow-empty`.
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | No deploy-blocking errors |
+| `1` | Deploy-blocking SEO errors found |
+| `2` | Input unreadable (wrong directory, forgot `npm run build`) |
+| `3` | Nothing to inspect — no public pages were prerendered |
+
+Useful flags:
+
+```bash
+# Compare source routes against prerendered pages — exposes "the whole site is dynamic"
+node $SKILL/scripts/check-seo.mjs .next/server/app --src=src/app
+
+# Allow a build with zero public pages (all-dynamic app)
+node $SKILL/scripts/check-seo.mjs .next/server/app --allow-empty
+```
+
 **Severity model.** Only three things fail the build:
 
 1. A missing `<title>` on an indexable page.

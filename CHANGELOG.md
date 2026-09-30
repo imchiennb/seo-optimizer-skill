@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-09-30
+
+First audit of a real production Next.js application (`moai.profyai.vn`, source at
+`apps/web`). The codebase is mature — a proper `modules/seo/` with a single source of truth
+for domain, `buildMetadata()`, an escaping `JsonLd` component, sitemap with full hreflang
+plus `x-default`, and a `robots.ts` carrying comments explaining why `/_next/` is *not*
+disallowed. Auditing it still found two defects in this skill, both serious.
+
+### Fixed
+
+- **`check-seo.mjs` reported success on a build it never inspected.** That project builds
+  **5 routes** but emits **0 prerendered public pages** (only `_not-found.html` and
+  `_global-error.html`), because every route is dynamic. The script printed
+  `Đã kiểm tra 0 trang` and then `✅ Không có lỗi SEO chặn deploy` with **exit 0** — a false
+  pass in a CI gate, the most dangerous failure mode a gate can have. It now exits **3** with
+  a loud, actionable diagnostic when there are no public pages to check. `--allow-empty`
+  opts out for genuinely all-dynamic apps (dashboards, authenticated apps).
+- **The "hybrid?" hint fired on essentially every App Router project.** Next always emits
+  `.next/server/pages/404.html` and `500.html`, even for App Router-only apps, so the
+  `existsSync` check was true almost everywhere. On the audited project — pure App Router,
+  no `pages/` directory in source — the hint was simply wrong. It now only fires when that
+  directory actually contains non-framework routes. A hint that cries wolf gets ignored.
+
+### Added
+
+- **`grep-antipatterns.sh` check 21 — `next/headers` in layouts (and behind helper modules).**
+  This is the highest-value addition in this release: it detects the *cause* of the production
+  problem that `audit-url.sh` had only been able to see as a symptom. Critically, it **follows
+  one level of local imports** and reads `@/*` from `tsconfig.json`, because the audited
+  layout did not import `next/headers` itself — it called `getPrefsFromCookies()` from a util
+  module. A direct grep reported "✓ no next/headers in any layout", which was flatly wrong.
+  It now prints the exact chain:
+  `src/app/[lang]/layout.tsx  ←  src/modules/utils/prefs.server.ts`
+- `check-seo.mjs --src=src/app` compares source route count against prerendered pages, which
+  is how "the whole site is dynamic" becomes visible.
+- `check-seo.mjs` now checks `<meta name="viewport">` presence.
+- `check-seo.mjs` detects `og:image` that **lies about its dimensions** — a metadata helper
+  defaulting to `1200×630` was declaring those numbers for 480×360 YouTube thumbnails.
+  It also flags YouTube thumbnails below the OG recommendation and names `maxresdefault`.
+- `references/02-rendering-and-caching.md`: a full real-world case study of `cookies()` in a
+  layout killing static rendering, with the symptom measured from outside, the build
+  evidence, the source, and three fix options with trade-offs.
+- `references/10-antipatterns.md`: new entries **10.29** (`cookies()` hidden behind a helper)
+  and **10.30** (metadata helper lying about image dimensions, with a YouTube thumbnail size
+  table), and three new rows in the symptom → suspicion table.
+
+### Verified
+
+- Self-test count: 57 → 67 checks. Seven new regressions verified to **fail** against the
+  previous `check-seo.mjs` / `grep-antipatterns.sh` and pass against these.
+- Both fixes re-tested against the real project: exit 3 instead of a false pass, zero false
+  hybrid hints, and the helper-import chain detected correctly.
+- New checks confirmed to produce **no false positives** on a correct page
+  (`maxresdefault.jpg` at 1280×720 → zero warnings).
+
+### Known gaps (unchanged)
+
+- Windows (Bash-only), and no automated Core Web Vitals measurement.
+
 ## [1.0.3] - 2026-09-30
 
 Filled the version and feature verification matrix by building and auditing real projects
