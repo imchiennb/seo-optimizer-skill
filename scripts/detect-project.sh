@@ -73,13 +73,14 @@ fi
 # ---------- 3. Số route ----------
 hr "3. Quy mô route"
 if [ -n "$APP_DIR" ]; then
-  N_PAGE=$(find "$APP_DIR" -name "page.tsx" -o -name "page.ts" -o -name "page.jsx" -o -name "page.js" 2>/dev/null | wc -l | tr -d ' ')
-  N_LAYOUT=$(find "$APP_DIR" -name "layout.tsx" -o -name "layout.ts" 2>/dev/null | wc -l | tr -d ' ')
+  # Next cho phép .js / .jsx / .ts / .tsx cho mọi file convention — phải đếm đủ cả 4.
+  N_PAGE=$(find "$APP_DIR" -type f \( -name "page.tsx" -o -name "page.ts" -o -name "page.jsx" -o -name "page.js" \) 2>/dev/null | wc -l | tr -d ' ')
+  N_LAYOUT=$(find "$APP_DIR" -type f \( -name "layout.tsx" -o -name "layout.ts" -o -name "layout.jsx" -o -name "layout.js" \) 2>/dev/null | wc -l | tr -d ' ')
   N_DYNAMIC=$(find "$APP_DIR" -type d -name "\[*\]" 2>/dev/null | wc -l | tr -d ' ')
-  N_API=$(find "$APP_DIR" -type f -name "route.ts" -o -name "route.tsx" 2>/dev/null | wc -l | tr -d ' ')
-  echo "   page.tsx   : $N_PAGE"
-  echo "   layout.tsx : $N_LAYOUT"
-  echo "   route.ts   : $N_API"
+  N_API=$(find "$APP_DIR" -type f \( -name "route.ts" -o -name "route.tsx" -o -name "route.js" -o -name "route.jsx" \) 2>/dev/null | wc -l | tr -d ' ')
+  echo "   page.*     : $N_PAGE"
+  echo "   layout.*   : $N_LAYOUT"
+  echo "   route.*    : $N_API"
   echo "   segment động [param]: $N_DYNAMIC"
   [ "$N_DYNAMIC" -gt 0 ] && echo "     → Kiểm tra dynamicParams ở từng segment động (chống không gian URL vô hạn)"
 fi
@@ -118,17 +119,30 @@ fi
 
 # ---------- 5. Hạ tầng SEO hiện có ----------
 hr "5. Hạ tầng SEO hiện có"
-chk() { [ -e "$2" ] && echo "   ✅ $1 → $2" || echo "   ❌ $1 → $2 (THIẾU)"; }
+chk_ext() {  # $1 = nhãn, $2 = đường dẫn không phần mở rộng
+  for e in ts tsx js jsx mjs; do
+    if [ -f "$2.$e" ]; then echo "   ✅ $1 → $2.$e"; return; fi
+  done
+  echo "   ❌ $1 → $2.{ts,tsx,js,jsx} (THIẾU)"
+}
+chk_icon() {  # $1 = nhãn, $2 = đường dẫn không phần mở rộng
+  for e in png ico svg jpg jpeg tsx jsx ts js; do
+    if [ -f "$2.$e" ]; then echo "   ✅ $1 → $2.$e"; return; fi
+  done
+  echo "   ❌ $1 → $2.{png,ico,svg,jpg} (THIẾU)"
+}
 if [ -n "$APP_DIR" ]; then
-  chk "sitemap" "$APP_DIR/sitemap.ts"
-  chk "robots"  "$APP_DIR/robots.ts"
-  chk "not-found" "$APP_DIR/not-found.tsx"
-  chk "manifest" "$APP_DIR/manifest.ts"
-  chk "opengraph-image" "$APP_DIR/opengraph-image.tsx"
-  chk "icon" "$APP_DIR/icon.png"
+  chk_ext "sitemap"        "$APP_DIR/sitemap"
+  chk_ext "robots"         "$APP_DIR/robots"
+  chk_ext "not-found"      "$APP_DIR/not-found"
+  chk_ext "manifest"       "$APP_DIR/manifest"
+  chk_ext "opengraph-image" "$APP_DIR/opengraph-image"
+  chk_ext "twitter-image"  "$APP_DIR/twitter-image"
+  chk_icon "icon"          "$APP_DIR/icon"
+  chk_icon "apple-icon"    "$APP_DIR/apple-icon"
 fi
-[ -f public/robots.txt ] && echo "   ⚠ public/robots.txt tồn tại — kiểm tra xung đột với app/robots.ts"
-[ -f public/sitemap.xml ] && echo "   ⚠ public/sitemap.xml tồn tại — kiểm tra xung đột với app/sitemap.ts"
+[ -f public/robots.txt ] && echo "   ⚠ public/robots.txt tồn tại — kiểm tra xung đột với app/robots.*"
+[ -f public/sitemap.xml ] && echo "   ⚠ public/sitemap.xml tồn tại — kiểm tra xung đột với app/sitemap.*"
 [ -d public ] && [ -z "$(ls -A public 2>/dev/null | grep -iE 'robots|sitemap')" ] && echo "   · public/: không có robots/sitemap tĩnh"
 
 hr "6. Middleware / Proxy"

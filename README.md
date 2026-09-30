@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Next.js](https://img.shields.io/badge/Next.js-13%20%E2%86%92%2016-black)](https://nextjs.org)
 [![Format](https://img.shields.io/badge/format-Agent%20Skill-blue)](#install)
-[![Self-tested](https://img.shields.io/badge/self--test-passing-brightgreen)](scripts/self-test.sh)
+[![validate](https://github.com/imchiennb/seo-optimizer-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/imchiennb/seo-optimizer-skill/actions/workflows/validate.yml)
 
 **Guiding principle: the server's raw HTML is the source of truth.** Every conclusion must be backed by `curl` output, a script result, or a real metric — never by reading code and guessing.
 
@@ -84,6 +84,24 @@ bash $SKILL/scripts/audit-url.sh https://example.com / /pricing /contact
 ```
 
 `check-seo.mjs` exits `1` when it finds a deploy-blocking error, so it drops straight into CI.
+
+Point it at the output directory for your router:
+
+| Project | Directory |
+| --- | --- |
+| App Router | `.next/server/app` |
+| Pages Router | `.next/server/pages` |
+| Static export (`output: 'export'`) | `out` |
+
+It automatically skips framework-generated pages, which always lack metadata and are not yours to fix: `_not-found` and `_global-error` (App Router), `404` and `500` (Pages Router). Pass `--all` to audit those too.
+
+**Severity model.** Only three things fail the build:
+
+1. A missing `<title>` on an indexable page.
+2. A missing, relative, or `http://` canonical on an indexable page.
+3. The same title on more than one indexable page.
+
+Everything else — missing description, missing OG tags, no JSON-LD, missing `lang`, heading count, images without `alt`, over-long titles — is reported as a **warning**. Those are real problems worth fixing, but they do not break indexing, and treating them as blocking is how an SEO gate ends up permanently red and ignored.
 
 ```yaml
 # .github/workflows/seo.yml

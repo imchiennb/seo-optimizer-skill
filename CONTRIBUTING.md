@@ -37,10 +37,11 @@ If a claim is contested between a blog post and official docs, the docs win and 
 ## Hard constraints
 
 1. **`SKILL.md` must stay tiny.** Agent hosts reject oversized skill bodies — the observed limit is roughly 1.2 KB of body text. A previous, much better-written version was rejected for being ~4 KB. Routing tables and detail belong in `references/00-index.md`.
-2. **Language split.** `README.md`, `README.vi.md`, `CONTRIBUTING.md`, `CHANGELOG.md` and `SKILL.md` are in English. The 18 reference documents are in Vietnamese.
+2. **Language split.** `README.md`, `README.vi.md`, `CONTRIBUTING.md`, `CHANGELOG.md` and `SKILL.md` are in English. The 18 reference documents and the files in `templates/` are in Vietnamese.
 3. **No npm dependencies.** `scripts/*.mjs` use Node built-ins only.
-4. **Scripts take paths as arguments.** They must work from any working directory — never assume the caller's cwd is the project root.
+4. **Scripts take paths as arguments.** They must work from any working directory — never assume the caller's cwd is the project root. `grep-antipatterns.sh` derives the project root from the app directory; use `PROJECT_ROOT` to override.
 5. **Never renumber existing references.** Links across documents depend on the numbers. Append with the next free number.
+6. **Fixtures must come from real builds.** Do not hand-write a fixture and assume it matches framework output — that mistake produced a false "blocking defect" report during development. Capture the actual `.next/server/app` or `.next/server/pages` listing from a real `next build` and encode that. If you cannot build, say so in the PR instead of inventing the shape.
 
 ---
 

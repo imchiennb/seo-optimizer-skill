@@ -141,6 +141,58 @@ node "$SKILL_DIR/scripts/check-seo.mjs" good >/dev/null 2>&1
 node "$SKILL_DIR/scripts/check-seo.mjs" bad >/dev/null 2>&1
 [ $? -eq 1 ] && ok "check-seo.mjs → exit 1 on broken page" || bad "check-seo.mjs did NOT flag a broken page"
 
+# --- 7b2. REGRESSION: real Next.js build output must NOT produce false positives.
+# Filename shapes captured from actual builds (Next 16.3.7 App Router, Next 15 Pages Router):
+#   App Router  : _global-error.html, _not-found.html, index.html, pricing.html, san-pham/abc.html
+#   Pages Router: 404.html, 500.html, index.html, san-pham/abc.html
+# Before this regression test, BOTH healthy projects exited 1 because framework-internal
+# pages were audited as if they were real pages.
+mk_clean() {  # $1=file path  $2=title  $3=canonical  $4=description
+  mkdir -p "$(dirname "$1")"
+  cat > "$1" <<HTML
+<!DOCTYPE html><html lang="vi"><head><title>$2</title>
+<meta name="description" content="$4">
+<link rel="canonical" href="$3">
+<meta property="og:title" content="$2">
+<meta property="og:image" content="https://example.com/og.png">
+<script type="application/ld+json">{"@context":"https://schema.org"}</script>
+</head><body><h1>$2</h1></body></html>
+HTML
+}
+SHELL_MIN='<!DOCTYPE html><html><head></head><body></body></html>'
+
+apx="app-real"
+mk_clean "$apx/index.html"        "Trang chủ thương hiệu demo"  "https://example.com/"             "Mô tả trang chủ đủ dài để không kích hoạt cảnh báo về độ dài trong script kiểm tra này."
+mk_clean "$apx/pricing.html"      "Bảng giá dịch vụ trọn gói"   "https://example.com/pricing"      "Mô tả trang bảng giá đủ dài để không kích hoạt cảnh báo về độ dài trong script kiểm tra này."
+mk_clean "$apx/san-pham/abc.html" "Sản phẩm ABC chính hãng"     "https://example.com/san-pham/abc" "Mô tả sản phẩm ABC đủ dài để không kích hoạt cảnh báo về độ dài trong script kiểm tra."
+printf '%s' "$SHELL_MIN" > "$apx/_global-error.html"
+printf '%s' "$SHELL_MIN" > "$apx/_not-found.html"
+
+node "$SKILL_DIR/scripts/check-seo.mjs" "$apx" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "REGRESSION app-router: _not-found/_global-error no longer break the build" \
+             || bad "REGRESSION: healthy App Router output exits non-zero"
+
+node "$SKILL_DIR/scripts/check-seo.mjs" "$apx" --all >/dev/null 2>&1
+[ $? -eq 1 ] && ok "check-seo.mjs --all still audits framework pages" \
+             || bad "--all no longer includes framework pages"
+
+pgx="pages-real"
+mk_clean "$pgx/index.html"        "Trang chủ Pages Router demo" "https://example.com/"             "Mô tả trang chủ Pages Router đủ dài để không kích hoạt cảnh báo về độ dài trong script."
+mk_clean "$pgx/san-pham/abc.html" "Sản phẩm ABC Pages Router"  "https://example.com/san-pham/abc" "Mô tả sản phẩm Pages Router đủ dài để không kích hoạt cảnh báo về độ dài trong script."
+printf '%s' "$SHELL_MIN" > "$pgx/404.html"
+printf '%s' "$SHELL_MIN" > "$pgx/500.html"
+
+node "$SKILL_DIR/scripts/check-seo.mjs" "$pgx" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "REGRESSION pages-router: 404.html/500.html no longer break the build" \
+             || bad "REGRESSION: healthy Pages Router output exits non-zero"
+
+# Guard against over-suppression: a REAL page missing <title> must still fail.
+mk_clean "$pgx/thieu-title.html" "" "https://example.com/x" "Mô tả đủ dài cho trang thiếu title để chắc chắn script vẫn bắt được lỗi thật sự nghiêm trọng."
+node "$SKILL_DIR/scripts/check-seo.mjs" "$pgx" >/dev/null 2>&1
+[ $? -eq 1 ] && ok "check-seo.mjs still fails a real page missing <title>" \
+             || bad "check-seo.mjs stopped catching missing <title> — over-suppression!"
+rm -f "$pgx/thieu-title.html"
+
 # --- 7c. detect-project.sh must identify App Router
 mkdir -p app-proj/app/danh-muc app-proj/public
 printf '%s' '{"dependencies":{"next":"16.3.7","react":"19.2.0"}}' > app-proj/package.json
@@ -165,6 +217,27 @@ printf '%s\n' "export const dynamic = 'force-dynamic'" > scan/app/page.tsx
 OUT3=$(bash "$SKILL_DIR/scripts/grep-antipatterns.sh" scan/app 2>&1)
 echo "$OUT3" | grep -q 'force-dynamic'      && ok "grep-antipatterns.sh → found force-dynamic" || bad "missed force-dynamic"
 echo "$OUT3" | grep -q 'THIẾU metadataBase' && ok "grep-antipatterns.sh → found missing metadataBase" || bad "missed missing metadataBase"
+
+# --- 7f. REGRESSION: .js/.jsx projects must be detected (was .ts/.tsx only)
+jsx="jsx-proj"
+mkdir -p "$jsx/app"
+printf '%s' '{"dependencies":{"next":"16.3.7","react":"19.2.0"}}' > "$jsx/package.json"
+printf '%s' 'export const metadata = {}' > "$jsx/app/page.jsx"
+printf '%s' 'export default function L({children}){return children}' > "$jsx/app/layout.jsx"
+printf '%s' 'export default function s(){return []}' > "$jsx/app/sitemap.js"
+printf '%s' 'export default function r(){return {}}' > "$jsx/app/robots.js"
+printf '%s' 'export default function N(){return null}' > "$jsx/app/not-found.jsx"
+printf '%s' 'module.exports = {}' > "$jsx/next.config.js"
+OUT4=$(bash "$SKILL_DIR/scripts/detect-project.sh" "$jsx" 2>&1)
+echo "$OUT4" | grep -q 'app/sitemap.js'   && ok "REGRESSION detect-project.sh finds sitemap.js" || bad "REGRESSION: sitemap.js reported missing"
+echo "$OUT4" | grep -q 'app/robots.js'    && ok "REGRESSION detect-project.sh finds robots.js"  || bad "REGRESSION: robots.js reported missing"
+echo "$OUT4" | grep -q 'layout.\*   : 1'  && ok "detect-project.sh counts layout.jsx"          || bad "layout.jsx not counted"
+
+# --- 7g. REGRESSION: grep-antipatterns.sh must resolve the project root, not the cwd
+OUT5=$(bash "$SKILL_DIR/scripts/grep-antipatterns.sh" "$TMP/$jsx/app" 2>&1)
+echo "$OUT5" | grep -q 'next.config.js'        && ok "REGRESSION grep-antipatterns.sh finds next.config from another cwd" || bad "REGRESSION: next.config not found when cwd differs"
+echo "$OUT5" | grep -q 'không tìm thấy next.config' && bad "REGRESSION: still reports next.config missing" || true
+echo "$OUT5" | grep -q 'chỉ có .*app/robots.js' && ok "grep-antipatterns.sh resolves public/ against project root" || warn "robots conflict check did not report the convention file"
 echo "$OUT3" | grep -q 'Client Component'   && ok "grep-antipatterns.sh → found metadata in client component" || bad "missed metadata-in-client-component"
 
 # ---------------------------------------------------------------- summary

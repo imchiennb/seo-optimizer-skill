@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-30
+
+Verified against **real** Next.js builds for the first time — `next@16.3.7` App Router
+(Turbopack) and `next@15` Pages Router. That validation found four defects that the
+original hand-written fixtures could not, because those fixtures encoded the author's
+assumptions rather than the framework's actual output.
+
+### Fixed
+
+- **`check-seo.mjs` failed healthy projects.** Next.js emits framework-internal pages
+  (`_not-found`, `_global-error` on App Router; `404`, `500` on Pages Router) that always
+  lack metadata. They were audited as real pages, producing deploy-blocking errors, so the
+  CI gate was permanently red on any working project. Framework-internal pages are now
+  skipped by default and reported; `--all` audits them anyway.
+- **`detect-project.sh` only recognised `.ts`/`.tsx`.** A JavaScript project reported
+  `sitemap`, `robots`, `not-found`, `manifest`, `opengraph-image`, `apple-icon` and
+  `twitter-image` as missing, and under-counted `layout` and `route` files. All four
+  extensions (`.ts`, `.tsx`, `.js`, `.jsx`) are now checked everywhere.
+- **`grep-antipatterns.sh` resolved paths against the working directory**, not the project.
+  Run with an absolute path from another directory, it reported `next.config` as missing and
+  checked the wrong `public/`. The project root is now derived from the app directory, with
+  `PROJECT_ROOT` as an override.
+- **`README.md` carried a permanently-green badge.** `img.shields.io/...self--test-passing`
+  is a static image that reads "passing" even when CI is red. Replaced with the real
+  GitHub Actions workflow badge.
+
+### Changed
+
+- **`check-seo.mjs` severity model is now explicit.** Only a missing `<title>`, a
+  missing/relative/`http://` canonical, and duplicate titles across indexable pages fail the
+  build. Missing description, OG tags, JSON-LD, `lang`, heading count and image `alt` are
+  warnings. Documented in `README.md` and in the script header.
+- Title/description duplication only considers indexable pages (`noindex` excluded).
+- `README.md` documents the output directory per router and the `--all` flag.
+
+### Added
+
+- Six regression tests in `scripts/self-test.sh` built from **captured real build output**,
+  covering: App Router framework pages, Pages Router `404`/`500`, `.js`/`.jsx` detection,
+  and cwd-independent project-root resolution. Verified to fail against the previous scripts
+  and pass against the fixed ones.
+- A guard test asserting a real page missing `<title>` still fails, so the new suppression
+  cannot silently over-suppress.
+- `references/00-index.md` notes that reference number `12` is intentionally unused, and
+  `CONTRIBUTING.md` states that `templates/` is in Vietnamese.
+- Self-test count: 36 → 45 checks.
+
 ## [1.0.0] - 2026-09-30
 
 Initial public release.

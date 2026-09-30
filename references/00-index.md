@@ -28,6 +28,8 @@
 
 **Tra cứu nhanh theo triệu chứng:** [10-antipatterns.md](10-antipatterns.md) §bảng tra · [17-debug-traffic-drop.md](17-debug-traffic-drop.md) §cây quyết định.
 
+> **Về đánh số:** số `12` được để trống có chủ đích. Tài liệu 12 trong bản gốc là ghi chú về cách đóng gói skill — không phải nội dung dùng khi hành nghề, nên không phát hành kèm. Các số còn lại giữ nguyên để không phá liên kết giữa các tài liệu.
+
 ---
 
 ## 2. Bản đồ 5 tầng
