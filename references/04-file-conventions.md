@@ -129,6 +129,52 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 | Giới hạn | 50.000 URL và 50MB (chưa nén) mỗi file |
 | Không dùng để "nhờ index" | Sitemap là kênh discovery, không phải lệnh index |
 
+### ⚠️ Static export (`output: 'export'`) làm hỏng build nếu thiếu `force-static`
+
+Đã kiểm chứng trên Next.js 15.1.6. Nếu `next.config` có `output: 'export'` và bạn dùng `app/sitemap.js` hoặc `app/robots.js`, build **thất bại** với thông báo rất khó hiểu:
+
+```
+Error: export const dynamic = "force-static"/export const revalidate not configured
+on route "/sitemap.xml" with "output: export".
+```
+
+Lý do: sitemap và robots là **Route Handler**; ở chế độ static export mọi Route Handler phải tĩnh một cách tường minh. Cách sửa — thêm một dòng vào đầu mỗi file:
+
+```ts
+// app/sitemap.ts
+export const dynamic = 'force-static'   // BẮT BUỘC khi output: 'export'
+
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  // ...
+}
+```
+
+```ts
+// app/robots.ts
+export const dynamic = 'force-static'   // BẮT BUỘC khi output: 'export'
+
+export default function robots(): MetadataRoute.Robots {
+  // ...
+}
+```
+
+> Nếu không cần sinh động, phương án khác là bỏ hẳn file convention và đặt `public/sitemap.xml` + `public/robots.txt` tĩnh — nhưng khi đó phải tự cập nhật thủ công.
+>
+> Lưu ý: `output: 'export'` **không** cho phép `generateSitemaps` (chia sitemap) vì cần route động.
+
+### Kiểm tra sau khi build
+
+```bash
+# App Router
+node <SKILL_DIR>/scripts/check-seo.mjs .next/server/app
+# Pages Router
+node <SKILL_DIR>/scripts/check-seo.mjs .next/server/pages
+# HYBRID (app/ + pages/): truyền CẢ HAI để bắt được title trùng giữa hai router
+node <SKILL_DIR>/scripts/check-seo.mjs .next/server/app .next/server/pages
+# Static export
+node <SKILL_DIR>/scripts/check-seo.mjs out
+```
+
 ### Chia nhỏ sitemap với `generateSitemaps`
 
 Khi vượt 50k URL:

@@ -283,6 +283,54 @@ else
 fi
 kill "$SRV_PID" 2>/dev/null
 
+# --- 7i. REGRESSION: hybrid projects need BOTH output directories in one run.
+# Found by building a real hybrid project (next@15): the App Router run alone
+# reported exit 0 while a duplicate title lived in the Pages Router output.
+hyb="hybrid"
+mkdir -p "$hyb/app" "$hyb/pages"
+mk_clean "$hyb/app/index.html"     "Matrix Demo"                 "https://example.com/"     "Mô tả trang chủ đủ dài để không kích hoạt cảnh báo về độ dài trong script kiểm tra."
+mk_clean "$hyb/pages/legacy.html"  "Trang Pages Router riêng"    "https://example.com/legacy" "Mô tả trang Pages Router đủ dài để không kích hoạt cảnh báo về độ dài trong script."
+
+node "$SKILL_DIR/scripts/check-seo.mjs" "$hyb/app" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "hybrid: App Router dir alone passes (as expected)" \
+             || bad "hybrid: App Router dir alone did not pass"
+
+OUT7=$(node "$SKILL_DIR/scripts/check-seo.mjs" "$hyb/app" 2>&1)
+echo "$OUT7" | grep -q 'dự án hybrid' && ok "check-seo.mjs hints at the un-passed sibling pages dir" \
+                                      || bad "no hint about the sibling pages dir"
+
+node "$SKILL_DIR/scripts/check-seo.mjs" "$hyb/app" "$hyb/pages" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "hybrid: both dirs together pass" || bad "hybrid: both dirs together failed"
+
+# now plant a duplicate title ACROSS the two routers
+mk_clean "$hyb/pages/dup.html" "Matrix Demo" "https://example.com/dup" "Mô tả trang trùng title đủ dài để không kích hoạt cảnh báo về độ dài trong script kiểm."
+node "$SKILL_DIR/scripts/check-seo.mjs" "$hyb/app" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "REGRESSION hybrid: app-only run STILL misses the cross-router duplicate (documented gap)" \
+             || warn "app-only run now catches cross-router duplicates"
+node "$SKILL_DIR/scripts/check-seo.mjs" "$hyb/app" "$hyb/pages" >/dev/null 2>&1
+[ $? -eq 1 ] && ok "REGRESSION hybrid: both dirs catch the cross-router duplicate title" \
+             || bad "REGRESSION: cross-router duplicate title not detected"
+OUT8=$(node "$SKILL_DIR/scripts/check-seo.mjs" "$hyb/app" "$hyb/pages" 2>&1)
+echo "$OUT8" | grep -q 'Title trùng' && ok "duplicate report names the offending routes" || bad "duplicate report lacks routes"
+
+# --- 7j. REGRESSION: static export shape (trailingSlash: true).
+# Captured from a real `next build` with output:'export': out/ holds
+# index.html, san-pham/abc/index.html and BOTH 404.html and 404/index.html.
+exp="export-out"
+mkdir -p "$exp/san-pham/abc" "$exp/404"
+mk_clean "$exp/index.html"           "Trang chủ static export" "https://example.com/"             "Mô tả trang chủ static export đủ dài để không kích hoạt cảnh báo về độ dài trong script."
+mk_clean "$exp/san-pham/abc/index.html" "Sản phẩm ABC export" "https://example.com/san-pham/abc" "Mô tả sản phẩm static export đủ dài để không kích hoạt cảnh báo về độ dài trong script."
+printf '%s' "$SHELL_MIN" > "$exp/404.html"
+printf '%s' "$SHELL_MIN" > "$exp/404/index.html"
+
+OUT9=$(node "$SKILL_DIR/scripts/check-seo.mjs" "$exp" 2>&1)
+[ $? -eq 0 ] && ok "REGRESSION static export: out/ with trailingSlash shape passes" \
+             || bad "REGRESSION: static export output fails"
+echo "$OUT9" | grep -q 'Bỏ qua 1 trang nội bộ' && ok "static export: /404 deduplicated (404.html + 404/index.html)" \
+                                               || warn "static export: /404 not deduplicated"
+echo "$OUT9" | grep -q 'Đã kiểm tra 2 trang'  && ok "static export: routes resolved past /index.html" \
+                                              || bad "static export: index.html shape not resolved"
+
 # ---------------------------------------------------------------- summary
 cd "$SKILL_DIR" || exit 2
 printf '\n═══════════════════════════════════════════════════════════\n'

@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-09-30
+
+Filled the version and feature verification matrix by building and auditing real projects
+across `next@13.5.6`, `14.2.15`, `15.1.6` and `16.3.7` — App Router, Pages Router, hybrid,
+static export and monorepo. Before this, only 15 and 16 had ever been built.
+
+### Added
+
+- **`check-seo.mjs` accepts multiple output directories** and merges them into one report, so a
+  hybrid project (`app/` + `pages/`) is covered in a single run. Cross-router duplicate titles
+  are now detected. Previously you had to run the two directories separately — which, by
+  construction, could never see a duplicate spanning both routers. Verified on a real hybrid
+  build: the App Router run alone exits 0 while the duplicate lives in the Pages Router output.
+- Detects the same route existing in more than one output directory — Next serves only one, so
+  the other is dead weight.
+- Warns when `.next/server/app` is passed while a sibling `.next/server/pages` exists.
+- Framework-internal routes are deduplicated in the skip report (static export emits both
+  `404.html` and `404/index.html`, which previously printed `/404` twice).
+- `references/04-file-conventions.md`: documents that `output: 'export'` **fails the build** on
+  `app/sitemap.ts` and `app/robots.ts` unless they declare `export const dynamic = 'force-static'`.
+  Reproduced on `next@15.1.6`; the error message never mentions sitemaps. Also notes that
+  `generateSitemaps` is unavailable under static export.
+- `references/02-rendering-and-caching.md`: the real static export output shape — `out/`,
+  `<path>/index.html` with `trailingSlash: true`, and both `404.html` and `404/index.html`.
+- `README.md`: a "Verified against" table listing every configuration actually built and audited,
+  so the supported-version claim is backed by a reproducible list instead of an assertion.
+
+### Verified in this release
+
+| Configuration | Result |
+| --- | --- |
+| `next@13.5.6` App Router | build + `check-seo` exit 0 |
+| `next@14.2.15` App Router | build + `check-seo` exit 0 |
+| `next@15.1.6` App Router | build + `check-seo` exit 0 |
+| `next@16.3.7` App Router (Turbopack) | build + `check-seo` exit 0 |
+| `next@13.5.6` Pages Router | build + `check-seo` exit 0 |
+| `next@15` Pages Router | build + `check-seo` exit 0 |
+| `next@15.1.6` hybrid | both dirs merged; cross-router duplicate caught |
+| `next@15.1.6` static export | `out/` audited |
+| monorepo `apps/web/app` | project root resolved correctly |
+
+Next 13 emits no `_global-error.html`; Next 16 does. Both are handled by the same exclusion list,
+which is why the list was derived from real builds rather than assumed.
+
+- Self-test count: 48 → 57 checks. Three new regression tests verified to fail against the
+  previous `check-seo.mjs` and pass against this one.
+
+### Known gaps
+
+- **Windows** — the scripts are Bash-only.
+- **No automated Core Web Vitals measurement** — the skill tells you how to measure CWV; it does
+  not measure them for you.
+
 ## [1.0.2] - 2026-09-30
 
 First real-world run of `audit-url.sh`, against a live production Next.js site

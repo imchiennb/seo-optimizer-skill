@@ -92,8 +92,17 @@ Point it at the output directory for your router:
 | App Router | `.next/server/app` |
 | Pages Router | `.next/server/pages` |
 | Static export (`output: 'export'`) | `out` |
+| **Hybrid** (`app/` + `pages/`) | **both**, in one run |
 
-It automatically skips framework-generated pages, which always lack metadata and are not yours to fix: `_not-found` and `_global-error` (App Router), `404` and `500` (Pages Router). Pass `--all` to audit those too.
+Hybrid projects need both directories in a single invocation:
+
+```bash
+node $SKILL/scripts/check-seo.mjs .next/server/app .next/server/pages
+```
+
+Running only one silently misses the other router's routes — and misses duplicate titles *between* the two routers, which is precisely the kind of problem a hybrid project has. When only `.next/server/app` is passed and a sibling `.next/server/pages` exists, the script now says so.
+
+It automatically skips framework-generated pages, which always lack metadata and are not yours to fix: `_not-found` and `_global-error` (App Router), `404` and `500` (Pages Router and static export). Pass `--all` to audit those too.
 
 **Severity model.** Only three things fail the build:
 
@@ -204,6 +213,34 @@ Translations are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 | Agent host | Any host that loads Markdown skills |
 
 No third-party packages. Nothing is installed into your project.
+
+---
+
+## Verified against
+
+The scripts were validated by building real projects and running them on the actual output — not on hand-written fixtures. Reproduce any row yourself:
+
+| Configuration | Version | Result |
+| --- | --- | --- |
+| App Router | `next@13.5.6` | ✅ build, `check-seo` exit 0 |
+| App Router | `next@14.2.15` | ✅ build, `check-seo` exit 0 |
+| App Router | `next@15.1.6` | ✅ build, `check-seo` exit 0 |
+| App Router | `next@16.3.7` (Turbopack) | ✅ build, `check-seo` exit 0 |
+| Pages Router | `next@13.5.6` | ✅ build, `check-seo` exit 0 |
+| Pages Router | `next@15` | ✅ build, `check-seo` exit 0 |
+| Hybrid `app/` + `pages/` | `next@15.1.6` | ✅ both output dirs merged in one run |
+| Static export | `next@15.1.6` | ✅ `out/` audited |
+| Monorepo (`apps/web/app`) | `next@15.1.6` | ✅ project root resolved correctly |
+| JavaScript projects (`.js`/`.jsx`) | — | ✅ detected |
+| Live production site | — | ✅ `audit-url.sh` on a real property |
+
+The framework-internal page list (`_not-found`, `_global-error`, `404`, `500`) was derived from these real builds, so it holds across versions: Next 13 emits no `_global-error.html`, Next 16 does, and both are handled.
+
+**Not yet covered:** Windows (the scripts are Bash-only) and automated Core Web Vitals measurement — the skill tells you how to measure CWV, it does not measure them for you.
+
+### A gotcha found by this validation
+
+`output: 'export'` plus `app/sitemap.ts` **fails the build** unless you add `export const dynamic = 'force-static'`. The error message does not mention sitemaps. Documented in [`references/04-file-conventions.md`](references/04-file-conventions.md).
 
 ---
 

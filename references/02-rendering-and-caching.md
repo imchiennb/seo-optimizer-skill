@@ -223,8 +223,12 @@ Chỉ dùng khi host không hỗ trợ Node (S3, GitHub Pages…). Đánh đổi
 | `next/image` optimizer mặc định | Phải `images.unoptimized: true` → mất tối ưu ảnh |
 | Middleware/proxy redirect | Phải xử lý redirect ở host |
 | Header tuỳ biến | Không set được `X-Robots-Tag`, cache header |
+| Sitemap/robots dạng route handler | Build **thất bại** nếu thiếu `export const dynamic = 'force-static'` — xem [04-file-conventions.md](04-file-conventions.md) |
+| `generateSitemaps` (chia sitemap) | Không dùng được — cần route động |
 
 Nếu chọn static export, phải cấu hình `trailingSlash` phù hợp host và tự lo sitemap/redirect ở tầng CDN.
+
+> Đã kiểm chứng trên Next.js 15.1.6: output static export nằm ở `out/`, và với `trailingSlash: true` mỗi trang thành `<path>/index.html` (ví dụ `san-pham/abc/index.html`). Trang 404 sinh ra **cả** `404.html` **và** `404/index.html`.
 
 ```ts
 const nextConfig = {
