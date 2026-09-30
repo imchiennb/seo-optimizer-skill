@@ -414,6 +414,52 @@ echo "$OUTO" | grep -q 'thumbnail YouTube hqdefault' && ok "REGRESSION: flags sm
 echo "$OUTO" | grep -q 'kích thước khai man' && ok "REGRESSION: flags declared og:image dimensions that contradict the real image" \
                                             || bad "REGRESSION: false og:image dimensions not flagged"
 
+# --- 7p. REGRESSION: trang redirect tĩnh không được báo là lỗi SEO.
+# Next sinh HTML shell cho permanentRedirect(); shell đó không có canonical,
+# không <h1>, dùng title mặc định của layout. Đem audit sẽ tạo loạt lỗi giả.
+# Dấu hiệu tin cậy: payload RSC chứa NEXT_REDIRECT.
+# Phát hiện thật: /vi và /en của moai.profyai.vn (308 -> /{lang}/movies).
+rd="redirect-proj"
+mkdir -p "$rd"
+mk_clean "$rd/index.html" "Trang chủ thật của dự án" "https://example.com/" "Mô tả trang chủ đủ dài để không kích hoạt cảnh báo về độ dài trong script kiểm tra này."
+printf '%s' "$SHELL_MIN" > "$rd/vi.html"
+printf '%s' '{"redirect":"/vi/movies","statusCode":308,"marker":"NEXT_REDIRECT"}' > "$rd/vi.rsc"
+OUTR=$(node "$SKILL_DIR/scripts/check-seo.mjs" "$rd" 2>&1)
+RC=$?
+[ "$RC" -eq 0 ] && ok "REGRESSION: trang redirect (NEXT_REDIRECT) không tạo lỗi chặn deploy" \
+               || bad "REGRESSION: trang redirect bị báo lỗi chặn deploy"
+echo "$OUTR" | grep -q 'trang redirect' && ok "check-seo nêu rõ trang redirect đã bỏ qua" \
+                                       || bad "check-seo không báo đã bỏ qua trang redirect"
+
+# --- 7q. REGRESSION: trùng title giữa các locale (có hreflang) là CẢNH BÁO, không chặn.
+xl="locale-proj"; mkdir -p "$xl"
+for L in en vi; do
+  OTHER=$([ "$L" = "en" ] && echo vi || echo en)
+  cat > "$xl/$L.html" <<HTML
+<!DOCTYPE html><html lang="$L"><head><title>Showcase | Brand</title>
+<meta name="description" content="Mô tả trang showcase đủ dài để không kích hoạt cảnh báo về độ dài trong script kiểm tra này.">
+<link rel="canonical" href="https://example.com/$L">
+<link rel="alternate" hrefLang="$L" href="https://example.com/$L">
+<link rel="alternate" hrefLang="$OTHER" href="https://example.com/$OTHER">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script type="application/ld+json">{"@context":"https://schema.org"}</script>
+</head><body><h1>Showcase</h1></body></html>
+HTML
+done
+node "$SKILL_DIR/scripts/check-seo.mjs" "$xl" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "REGRESSION: title giống nhau giữa locale (hreflang) không chặn deploy" \
+             || bad "REGRESSION: biến thể locale bị coi là trùng title chặn deploy"
+OUTX=$(node "$SKILL_DIR/scripts/check-seo.mjs" "$xl" 2>&1)
+echo "$OUTX" | grep -q 'biến thể hreflang' && ok "check-seo giải thích đây là biến thể locale" \
+                                           || bad "check-seo thiếu giải thích cho trùng title locale"
+# và trùng title KHÔNG có hreflang vẫn phải chặn
+xl2="dup-proj"; mkdir -p "$xl2"
+mk_clean "$xl2/a.html" "Cùng một tiêu đề" "https://example.com/a" "Mô tả trang A đủ dài để không kích hoạt cảnh báo về độ dài trong script kiểm tra này."
+mk_clean "$xl2/b.html" "Cùng một tiêu đề" "https://example.com/b" "Mô tả trang B đủ dài để không kích hoạt cảnh báo về độ dài trong script kiểm tra này."
+node "$SKILL_DIR/scripts/check-seo.mjs" "$xl2" >/dev/null 2>&1
+[ $? -eq 1 ] && ok "trùng title KHÔNG có hreflang vẫn chặn deploy" \
+             || bad "REGRESSION: trùng title thật bị bỏ qua"
+
 # ---------------------------------------------------------------- summary
 cd "$SKILL_DIR" || exit 2
 printf '\n═══════════════════════════════════════════════════════════\n'

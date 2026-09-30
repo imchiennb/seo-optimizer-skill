@@ -317,6 +317,7 @@ curl -sI https://example.com/san-pham/khong-ton-tai-xyz | head -1
 | **Mọi request trả `no-store`, CDN báo DYNAMIC** | **`next/headers` trong cây import của layout (10.29)** |
 | **`check-seo` báo "0 trang công khai"** | **Layout đọc cookie/header → toàn site dynamic (10.29)** |
 | **og:image trên social hiển thị sai/cắt xấu** | **Kích thước khai man trong helper metadata (10.30)** |
+| **Mọi locale trả cùng một ngôn ngữ, test vẫn pass** | **Computed key từ enum re-export thành `"undefined"` (10.31)** |
 | Site biến mất hoàn toàn | `noindex` rò rỉ (10.7), `robots.txt` (10.8), manual action |
 | Trang không được index | HTML thô (10.9), canonical (10.14), chất lượng nội dung |
 | Xếp hạng tụt không rõ lý do | Core update, cannibalization, mất backlink, CWV |
@@ -465,3 +466,68 @@ Dùng `maxresdefault.jpg` khi có, hoặc tự sinh ảnh OG bằng `ImageRespon
 
 > **Bài học tổng quát:** bất kỳ helper nào *điền giá trị mặc định* cho metadata đều có thể đang nói dối. `400` mặc định cho `og:image:width` cũng nguy hiểm như `200` cho một trang không tồn tại.
 
+
+---
+
+## 10.31. Computed key từ enum re-export → khoá `"undefined"` trong bundle
+
+| | |
+| --- | --- |
+| **Triệu chứng** | Mọi locale trả về CÙNG một ngôn ngữ (thường là ngôn ngữ mặc định); `Object.keys(map)` chỉ có một phần tử `"undefined"`; **test pass** nhưng production sai |
+| **Nguyên nhân** | Bảng tra dùng computed key lấy từ một enum được **re-export qua barrel** |
+| **Cách sửa** | Dùng khoá literal; thêm `satisfies Record<...>`; thêm assert lúc module nạp |
+| **Phát hiện** | Log `Object.keys(map)` khi build, hoặc assert ngay trong module |
+
+### Ca thật
+
+```ts
+// src/modules/i18n/index.ts
+import { AppLanguage } from './i18n-context';   // ← re-export từ './i18n-types'
+import EN from './languages/en';
+import VI from './languages/vi';
+
+export const SupportedLanguages = {
+  [AppLanguage.EN?.toString()]: EN,
+  [AppLanguage.VI?.toString()]: VI,
+} as const;
+```
+
+Trong bundle production, `AppLanguage` chưa có mặt lúc module này khởi tạo. Cả hai
+computed key đều thành chuỗi `"undefined"`, và **cái sau ghi đè cái trước**:
+
+```
+Object.keys(SupportedLanguages)  →  ["undefined"]
+```
+
+Kết quả: mọi locale đều rơi vào nhánh dự phòng và trả về tiếng Việt. Hậu quả đo được:
+**toàn bộ `/en/*` render title và description tiếng Việt**, trong khi `canonical` và
+`og:locale` vẫn đúng — vì chúng tính từ `lang` chứ không từ bảng tra này. Chính sự
+"đúng một nửa" đó làm bug khó thấy.
+
+### Vì sao test không bắt được
+
+`jest`/`ts-jest` biên dịch và khởi tạo module theo thứ tự khác bundler. Cùng đoạn code đó
+chạy đúng trong test và sai trong bundle. **Đây là lý do phải build thật rồi kiểm tra
+output, không chỉ chạy unit test.**
+
+### Cách sửa
+
+```ts
+export const SupportedLanguages = {
+  vi: VI,
+  en: EN,
+} as const satisfies Record<Locale, typeof VI>;
+
+// Bảo vệ hồi quy: hỏng thì ném lỗi ngay khi nạp module, thay vì âm thầm sai cả site.
+for (const locale of i18nConfig.locales) {
+  if (!SupportedLanguages[locale]) {
+    throw new Error(`[i18n] SupportedLanguages thiếu locale "${locale}"`);
+  }
+}
+```
+
+### Quy tắc tổng quát
+
+Bất kỳ map nào dùng **computed key lấy từ giá trị import** đều có rủi ro này — đặc biệt
+khi giá trị đó đi qua barrel/re-export. Ưu tiên khoá literal, và nếu buộc phải dùng
+computed key thì thêm assert để hỏng to và sớm.

@@ -102,6 +102,10 @@ node $SKILL/scripts/check-seo.mjs .next/server/app .next/server/pages
 
 Running only one silently misses the other router's routes — and misses duplicate titles *between* the two routers, which is precisely the kind of problem a hybrid project has. When only `.next/server/app` is passed and a sibling `.next/server/pages` exists, the script now says so.
 
+It also **skips static redirect routes** — Next emits a layout shell for `permanentRedirect()` that has no canonical and no `<h1>`, which would otherwise be reported as deploy-blocking errors. Detection is via the `NEXT_REDIRECT` marker in the RSC payload.
+
+Duplicate titles across **hreflang alternates** (the same term in several locales) are reported as a warning rather than a blocker, since that is an intentional locale variant — localising it is still recommended.
+
 It automatically skips framework-generated pages, which always lack metadata and are not yours to fix: `_not-found` and `_global-error` (App Router), `404` and `500` (Pages Router and static export). Pass `--all` to audit those too.
 
 **It refuses to pass a build it never inspected.** If a build produces no public pages at all — every route dynamic, nothing prerendered — the script exits **3** with a loud diagnostic instead of reporting success. This was a real false pass: a production project with 5 routes and 0 prerendered pages was being green-lit. For genuinely all-dynamic apps (dashboards, authenticated tools), pass `--allow-empty`.

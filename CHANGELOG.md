@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-09-30
+
+Applied the skill to a real production application end to end — the first time a fix was
+actually written, built and verified. It found two live bugs in that application, and then
+two false positives in this tool.
+
+### Fixed in the audited application (verified by rebuild)
+
+- **An i18n lookup map had exactly one key: `"undefined"`.**
+  `SupportedLanguages` built its keys with `[AppLanguage.EN?.toString()]`, where `AppLanguage`
+  arrived through a barrel re-export. In the production bundle that binding is absent at
+  module-evaluation time, so both computed keys became the string `"undefined"` and the second
+  overwrote the first. Every locale therefore resolved to Vietnamese.
+  Measured effect: **the entire English site rendered Vietnamese `title` and `description`**,
+  while `canonical` and `og:locale` stayed correct — because those derive from `lang`, not from
+  this map. The half-correct output is what made it hard to spot.
+  Jest passed; only a real build exposed it. Fixed with literal keys, `satisfies Record<…>`,
+  and a module-load assertion. Verified: `/en/movies` now renders
+  `Watch Movies Online Free - Latest Updates`.
+- **`cookies()` in the layout made the whole site dynamic.** Removing it took the build from
+  **0 prerendered public pages** to `/vi`, `/en`, `/vi/movies`, `/en/movies`, `/vi/showcase`,
+  `/en/showcase` all static, with the listing page on 1-minute ISR. Replaced with a constant
+  inline `<script>` in `<head>` that reads the cookie before paint, so there is no flash of
+  unstyled content and the page stays prerenderable.
+
+### Fixed in this tool
+
+- **Static redirect routes were audited as content pages.** Next emits a layout shell for
+  `permanentRedirect()` with no canonical and no `<h1>`. On the audited project `/vi` and `/en`
+  (which 308 to `/{lang}/movies`) produced four spurious deploy-blocking errors. They are now
+  detected via the `NEXT_REDIRECT` marker in the RSC payload and skipped, and reported as
+  skipped.
+- **Duplicate titles across hreflang alternates were deploy-blocking.** A term that is the same
+  word in several locales is an intentional locale variant, not accidental duplication. When
+  every page in a duplicate-title group is a mutual hreflang alternate, it is now a warning
+  recommending localisation. Duplicates *without* hreflang still block.
+
+### Added
+
+- `references/10-antipatterns.md` entry **10.31** — computed keys from a re-exported enum
+  collapsing to `"undefined"` in the bundle while passing in tests, with the general rule and
+  the guard to add. Plus a row in the symptom → suspicion table.
+- `README.md` notes on the redirect skipping and the hreflang-aware duplicate handling.
+- Self-test count: 67 → 72 checks. New regressions assert that redirect routes do not block,
+  that locale variants do not block, and that duplicates without hreflang still do.
+
 ## [1.0.4] - 2026-09-30
 
 First audit of a real production Next.js application (`moai.profyai.vn`, source at

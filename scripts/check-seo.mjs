@@ -82,15 +82,35 @@ const MULTI = DIRS.length > 1
 
 const entries = []
 const skipped = new Set()
+const redirects = []
 let totalHtml = 0
+
+/**
+ * Next sinh trang redirect tĩnh cho permanentRedirect(): HTML chỉ là shell của
+ * layout (không canonical, không <h1>, dùng title mặc định), nên nếu đem ra
+ * audit sẽ tạo ra loạt lỗi "chặn deploy" giả.
+ * Dấu hiệu tin cậy: payload RSC có NEXT_REDIRECT.
+ * Phát hiện thật: /vi và /en của moai.profyai.vn (308 → /{lang}/movies) bị báo
+ * thiếu canonical + trùng title, dù chúng chỉ là redirect.
+ */
+function isRedirectRoute(file) {
+  const rsc = file.replace(/\.html$/, '.rsc')
+  if (!existsSync(rsc)) return false
+  try {
+    return readFileSync(rsc, 'utf8').includes('NEXT_REDIRECT')
+  } catch {
+    return false
+  }
+}
 
 for (const dir of DIRS) {
   const html = walk(dir).filter((f) => f.endsWith('.html'))
   totalHtml += html.length
   for (const file of html) {
     const route = '/' + relative(dir, file).replace(/\.html$/, '').replace(/(^|\/)index$/, '')
-    if (!INCLUDE_INTERNAL && isInternal(route)) skipped.add(route)
-    else entries.push({ file, route, dir })
+    if (!INCLUDE_INTERNAL && isInternal(route)) { skipped.add(route); continue }
+    if (!INCLUDE_INTERNAL && isRedirectRoute(file)) { redirects.push(route); continue }
+    entries.push({ file, route, dir })
   }
 }
 
@@ -105,7 +125,8 @@ if (entries.length === 0) {
   console.error(`\n❌ KHÔNG CÓ TRANG CÔNG KHAI NÀO ĐỂ KIỂM TRA`)
   console.error(`   Thư mục: ${DIRS.join(', ')}`)
   console.error(`   Tìm thấy ${totalHtml} file HTML, nhưng tất cả đều là trang nội bộ`)
-  console.error(`   của framework (${[...skipped].join(', ') || 'không có'}) nên bị bỏ qua.`)
+  console.error(`   của framework (${[...skipped].join(', ') || 'không có'}) hoặc trang redirect`)
+  console.error(`   (${redirects.join(', ') || 'không có'}) nên bị bỏ qua.`)
 
   if (SRC && existsSync(SRC)) {
     const srcRoutes = walk(SRC).filter((f) => /^page\.(tsx|ts|jsx|js)$/.test(basename(f)))
@@ -156,7 +177,7 @@ for (const { file, route, dir } of entries) {
   const imgNoAlt = (html.match(/<img(?![^>]*\balt=)[^>]*>/gi) ?? []).length
   const lang = pick(html, /<html[^>]*\blang="([^"]*)"/i)
   const viewport = /<meta\s+name="viewport"/i.test(html)
-  const hreflangCount = (html.match(/<link[^>]*hreflang=/gi) ?? []).length
+  const hrefLang = (html.match(/<link[^>]*hrefLang=["']([^"']*)["'][^>]*>/gi) ?? []).map((t) => (t.match(/href=["']([^"']*)["']/i) ?? [])[1]).filter(Boolean)
 
   // ── ❌ CHẶN ──────────────────────────────────────────────────────────
   if (!title) errors.push(`${label}: thiếu <title>`)
@@ -223,7 +244,7 @@ for (const { file, route, dir } of entries) {
 
   // Chỉ trang index được mới tính vào trùng lặp title/description
   if (!noindex) {
-    if (title) titles.set(title, [...(titles.get(title) ?? []), label])
+    if (title) titles.set(title, [...(titles.get(title) ?? []), { label, hrefLang, canonical }])
     if (description) descs.set(description, [...(descs.get(description) ?? []), label])
   }
 }
@@ -235,11 +256,19 @@ for (const [route, dirs] of routeDirs) {
     )
   }
 }
-for (const [t, routes] of titles) {
-  if (routes.length > 1) {
-    errors.push(
-      `Title trùng ở ${routes.length} trang: "${t}" → ${routes.slice(0, 4).join(', ')}${routes.length > 4 ? '…' : ''}`,
-    )
+for (const [t, group] of titles) {
+  if (group.length <= 1) continue
+  const names = group.map((g) => g.label)
+  const list = `${names.slice(0, 4).join(', ')}${names.length > 4 ? '…' : ''}`
+  // Nếu mọi trang trong nhóm đều là alternate hreflang của nhau thì đây là biến
+  // thể locale, không phải trùng lặp ngoài ý muốn → cảnh báo, không chặn.
+  const allLinked =
+    group.every((g) => g.hrefLang.length > 0) &&
+    group.every((g) => group.every((o) => o === g || g.hrefLang.some((h) => h === o.canonical)))
+  if (allLinked) {
+    warnings.push(`Title giống nhau giữa các locale (biến thể hreflang): "${t}" → ${list} — nên bản địa hoá`)
+  } else {
+    errors.push(`Title trùng ở ${group.length} trang: "${t}" → ${list}`)
   }
 }
 for (const [, routes] of descs) {
@@ -278,6 +307,9 @@ for (const dir of DIRS) {
 // ── Báo cáo ────────────────────────────────────────────────────────────
 console.log(`\nĐã kiểm tra ${entries.length} trang HTML`)
 console.log(`Thư mục: ${DIRS.join(', ')}`)
+if (redirects.length) {
+  console.log(`Bỏ qua ${redirects.length} trang redirect (308/307 — không phải trang nội dung): ${redirects.join(', ')}`)
+}
 const skippedList = [...skipped]
 if (skippedList.length) {
   console.log(`Bỏ qua ${skippedList.length} trang nội bộ của framework: ${skippedList.join(', ')}`)
