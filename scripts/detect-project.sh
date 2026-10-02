@@ -178,7 +178,11 @@ if grep -rq "next/font" "${APP_DIR:-app}" ${PAGES_DIR:-pages} 2>/dev/null; then
   if grep -rq "vietnamese" "${APP_DIR:-app}" ${PAGES_DIR:-pages} 2>/dev/null; then
     echo "   ✅ có subset 'vietnamese'"
   else
-    echo "   ⚠ dùng next/font nhưng KHÔNG thấy subset 'vietnamese' — kiểm tra nếu site có tiếng Việt"
+    echo "   · dùng next/font, không khai subset 'vietnamese'"
+    echo "     ⚠ ĐÂY CHỈ LÀ GỢI Ý, KHÔNG PHẢI LỖI. Nhiều font (vd Be Vietnam Pro) đã"
+    echo "       gồm glyph tiếng Việt trong subset 'latin'. Cách kiểm chứng: build,"
+    echo "       đếm file woff2 trong .next/static/media, rồi thêm 'vietnamese' và build"
+    echo "       lại — nếu số file và dung lượng KHÔNG đổi thì subset đó là thừa."
   fi
 else
   echo "   (không dùng next/font)"

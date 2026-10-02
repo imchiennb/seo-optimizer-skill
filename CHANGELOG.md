@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-09-30
+
+### Fixed
+
+- **A script heuristic cried wolf, and the audit repeated it.** `detect-project.sh`
+  warned that a Vietnamese site's `next/font` config was missing the `vietnamese` subset.
+  Tested empirically instead of assuming: adding the subset changed the generated font
+  output by **exactly zero** — 12 `.woff2` files and 99.0 KB both before and after.
+  Be Vietnam Pro already carries Vietnamese glyphs in its `latin` subset. The change was
+  reverted rather than shipped alongside a justification that testing had just disproved,
+  and the heuristic now says plainly that it is a hint, not a finding, with the
+  before/after file-count method to settle it.
+
+### Added
+
+- `references/07-performance-cwv.md`: how to verify a font-subset claim empirically, and
+  the general rule — when a heuristic accuses, verify before fixing, and if the heuristic
+  is wrong, fix the heuristic rather than bending the code to satisfy it.
+
 ## [1.0.5] - 2026-09-30
 
 Applied the skill to a real production application end to end — the first time a fix was

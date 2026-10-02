@@ -132,6 +132,32 @@ const brand = localFont({
 
 ---
 
+### ⚠️ Đừng mặc định rằng thiếu subset `vietnamese` là lỗi
+
+Nhiều font đã bao gồm glyph tiếng Việt trong subset `latin` — đặc biệt các font
+làm riêng cho tiếng Việt như **Be Vietnam Pro**. Cảnh báo "thiếu subset
+vietnamese" của `detect-project.sh` chỉ là **gợi ý**, không phải kết luận.
+
+Kiểm chứng bằng thực nghiệm, đừng suy đoán:
+
+```bash
+# 1. Đếm file font TRƯỚC
+find .next/static/media -name '*.woff2' | wc -l
+du -sb .next/static/media
+
+# 2. Thêm 'vietnamese' vào subsets rồi build lại
+# 3. Đếm LẠI — nếu số file và dung lượng không đổi thì subset đó là thừa
+```
+
+Ca thật: một site tiếng Việt dùng Be Vietnam Pro với `subsets: ['latin']` bị
+gắn cờ. Sau khi thêm `'vietnamese'`, số file woff2 và dung lượng **không đổi
+một byte** (12 file, 99,0 KB) → kết luận: cảnh báo là **false positive**, và
+thay đổi đó đã được revert thay vì ship kèm một lời giải thích sai.
+
+> Bài học chung: một heuristic trong script có thể sai. Khi nó buộc tội, hãy
+> kiểm chứng trước khi sửa — và nếu heuristic sai thì sửa **heuristic**, không
+> phải sửa code cho vừa lòng nó.
+
 ## 7.4. Script bên thứ ba
 
 ```tsx
